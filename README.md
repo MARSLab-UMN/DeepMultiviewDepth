@@ -73,4 +73,9 @@ cd /home/PATH/TO/THIS/REPO/DeepMultiviewDepth
 ```
 
 # Run Demo
-1. Please download and extract the files provided by this [link](https://drive.google.com/file/d/1mNiZaDtmzxNSjHGUAZy9qwQ8Ek3ffJJO/view?usp=sharing) to `./checkpoints/` directory.
+1. Please download and extract the files provided by this [link](https://drive.google.com/file/d/1mNiZaDtmzxNSjHGUAZy9qwQ8Ek3ffJJO/view?usp=sharing) to `./checkpoints` directory.
+
+2. Run `demo.sh` to get the results of the [demo dataset](https://github.com/MARSLab-UMN/DeepMultiviewDepth/tree/main/dataset) in `./viusalization` folder.
+
+The results contain inputs, intermediate outputs, and final outputs of the proposed pipeline, same as the figure below:
+![Alt text](./qulitative.png?raw=true)
