@@ -1,5 +1,5 @@
 python3 main.py \
-  --train 0 --batch_size 1 --dataset_type demo --window -10 -5 0 5 10 \
+  --train 0 --batch_size 1 --dataset_type demo --window -10 -5 5 10 \
   --dataset_pickle_file ./pickles/scannet_rob_test.pkl \
   --raft_model ./checkpoints/raft.ckpt \
   --drn_model ./checkpoints/drn.ckpt \
