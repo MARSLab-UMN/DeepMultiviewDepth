@@ -142,8 +142,9 @@ class NyuFlowDataset(Dataset):
         logging.info('Number of frames for the usage {0} is {1}.'.format(usage, len(self)))
 
         self.fc = np.array([5.1885790117450188e+02, 5.1946961112127485e+02]) / resize
-        # self.cc = np.array([3.2558244941119034e+02, 2.5373616633400465e+02]) / resize
-        self.cc = np.array([159.5, 119.5])
+        self.cc = np.array([3.2558244941119034e+02, 2.5373616633400465e+02]) / resize
+        # self.fc = np.array([289.99, 289.93])
+        # self.cc = np.array([159.5, 119.5])
         self.image_size = (640 // resize, 480 // resize)
         self.homogeneous_coords = generate_image_homogeneous_coordinates(
             self.fc, self.cc, *self.image_size).permute(2, 0, 1)
@@ -161,17 +162,18 @@ class NyuFlowDataset(Dataset):
     def load_image(self, file, output_normalized_image=False):
         ImageFile.LOAD_TRUNCATED_IMAGES = True
         image = Image.open(file)
-        if image.width != self.image_size[0]:
-            image = image.resize(self.image_size)
+
+        img = image.resize(self.image_size)
+        img = np.array(img).astype(np.uint8)
+        img = torch.from_numpy(img).permute(2, 0, 1).float()
         if not output_normalized_image:
-            img = np.array(image).astype(np.uint8)
-            img = torch.from_numpy(img).permute(2, 0, 1).float()
             return img
-        else:
-            imgn = self.to_tensor(image)
-            img = np.array(image).astype(np.uint8)
-            img = torch.from_numpy(img).permute(2, 0, 1).float()
-            return img, imgn
+
+        imgn = self.to_tensor(image)
+        imgn = imgn[None, :, 27:-23, 33:-33]
+        imgn = torch.nn.functional.interpolate(imgn, size=(240, 320), mode='bilinear', align_corners=False)
+        imgn = imgn.view(3, 240, 320)
+        return img, imgn
 
     def handle_bad_item(self):
         logging.info("Warning: Bad pose detected. Replace with a random data item.")
@@ -236,18 +238,18 @@ class NyuFlowDataset(Dataset):
         rots_ref_in_other = np.stack([pose[0:3, 0:3] for pose in poses_ref_in_other])
         ts_ref_in_other = np.stack([pose[0:3, 3] for pose in poses_ref_in_other])
 
-        # normal prediction
-        predicted_normal_file = color_info.replace('color', 'normal_pred')
-        normal_img = Image.open(os.path.join(self.root, seq, 'normal_pred', predicted_normal_file))
-        assert normal_img.width == 320
-        assert normal_img.height == 240
-        normal_values = 1 - np.asarray(normal_img).astype(np.float32) / 127.5
-        normal_tensor = -self.to_tensor(normal_values) + 0.5
+        # # normal prediction
+        # predicted_normal_file = color_info.replace('color', 'normal_pred')
+        # normal_img = Image.open(os.path.join(self.root, seq, 'normal_pred', predicted_normal_file))
+        # assert normal_img.width == 320
+        # assert normal_img.height == 240
+        # normal_values = 1 - np.asarray(normal_img).astype(np.float32) / 127.5
+        # normal_tensor = -self.to_tensor(normal_values) + 0.5
 
         output = {'imagen': colorn, 'image': color, 'image2': color2,
                   'depth': depth_tensor, 'homo': self.homogeneous_coords,
                   'rots_ref_in_other': rots_ref_in_other, 'ts_ref_in_other': ts_ref_in_other,
-                  'predicted_normal': normal_tensor,
+                  # 'predicted_normal': normal_tensor,
                   'scene_path': '/'.join(color_info.split('/')[0:-2]), 'frame_index': frame_index}
 
         return output

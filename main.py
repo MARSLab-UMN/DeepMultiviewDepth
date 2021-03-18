@@ -8,7 +8,7 @@ import torch.autograd
 from torch.utils.data import DataLoader
 from PIL import Image
 
-from demo_dataset import DemoFlowDataset
+from demo_dataset import DemoFlowDataset, NyuFlowDataset
 import network_run
 from networks.depth_refinement_network import DRN
 
@@ -159,12 +159,24 @@ class RunMultiViewDepthEstimation(RunDepthRAFT, RunIterativeDepthCompletion):
 
     def _call_cnn(self, input_batch):
         bearings_ref_in_other, image1, image2, ts = self.load_inputs(input_batch)
+        rgb_image = input_batch['imagen'].cuda(non_blocking=True)
 
-        flows = [self.get_flow(image1, image2[:, k, ...]) for k in range(image2.shape[1])]
+        # import time
+        # start_time = time.time()
+
+        if image1.shape[0] == 1:
+            # When inference for a single image, put all pairs in a batch.
+            flows_batch = self.get_flow(image1.expand(image2.shape[1], -1, -1, -1), image2[0])
+            flows = [flow[None, ...] for flow in flows_batch]
+        else:
+            flows = [self.get_flow(image1, image2[:, k, ...]) for k in range(image2.shape[1])]
+
         flow_depth, flow_depth_confidence_scores = self.triangulation(bearings_ref_in_other, ts, flows, residual=True)
         flow_depth_confidence_scores = torch.cat(flow_depth_confidence_scores, dim=1)
 
-        rgb_image = input_batch['imagen'].cuda(non_blocking=True)
+        # flow_time = time.time() - start_time
+        # start_time = time.time()
+
         with torch.no_grad():
             if self.surface_normal_cnn is not None:
                 predicted_normals = self.surface_normal_cnn(rgb_image)
@@ -172,11 +184,33 @@ class RunMultiViewDepthEstimation(RunDepthRAFT, RunIterativeDepthCompletion):
                 predicted_normals = input_batch['predicted_normal'].cuda(non_blocking=True)
             predicted_normals = torch.nn.functional.normalize(predicted_normals)
 
+        # normal_time = time.time() - start_time
+        # start_time = time.time()
+
+        # rescale to ScanNet
+        flow_depth_s, flow_depth_confidence_scores_s = [
+            torch.nn.functional.interpolate(f[:, :, 13:-12, 17:-16], size=(240, 320),
+                                            mode='nearest') for f in [flow_depth, flow_depth_confidence_scores]]
         depth_complete = self.depth_refinement_network(rgb_image, predicted_normals,
-                                                       flow_depth, flow_depth_confidence_scores)
-        if self.output_path != '':
-            self.visualization(depth_complete, flow_depth, input_batch)
-        return depth_complete
+                                                       flow_depth_s, flow_depth_confidence_scores_s)
+        # depth_complete = self.depth_refinement_network(rgb_image, predicted_normals,
+        #                                                flow_depth, flow_depth_confidence_scores)
+
+        # rescale back
+        final = {key: 3 * torch.ones_like(depth_complete[key][-1]) for key in depth_complete}
+        final['d'] = flow_depth
+        for key in depth_complete:
+            final[key][:, :, 13:-12, 17:-16] = torch.nn.functional.interpolate(depth_complete[key][-1], size=(215, 287),
+                                                                               mode='nearest')
+            final[key] = [final[key]]
+        return final
+
+        # drn_time = time.time() - start_time
+        # print(flow_time, normal_time, drn_time, sep='\t')
+
+        # if self.output_path != '':
+        #     self.visualize(depth_complete, flow_depth, input_batch, normal_pred=predicted_normals)
+        # return depth_complete
 
     def _network_evaluate(self, input_batch, cnn_outputs):
         normal_error = None
@@ -277,9 +311,15 @@ if __name__ == '__main__':
     logging.info('sys.argv = {}'.format(sys.argv))
     logging.info('parsed arguments and their values: {}'.format(vars(args)))
 
-    train_dataset = DemoFlowDataset(usage='train', window=args.window, root='./dataset')
+    if args.dataset_type == 'nyu':
+        train_dataset = NyuFlowDataset(args.root, 'train', args.dataset_pickle_file, args.window,
+                                       skip_every_n_image=args.skip_every_n_image_train)
+        test_dataset = NyuFlowDataset(args.root, 'test', args.dataset_pickle_file, args.window,
+                                      skip_every_n_image=args.skip_every_n_image_test)
+    else:
+        train_dataset = DemoFlowDataset(usage='train', window=args.window, root='./dataset')
 
-    test_dataset = DemoFlowDataset(usage='test', window=args.window, root='./dataset')
+        test_dataset = DemoFlowDataset(usage='test', window=args.window, root='./dataset')
 
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                   shuffle=True, num_workers=args.dataloader_train_workers,
